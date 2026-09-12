@@ -1,0 +1,14 @@
+# Configuración con credenciales
+.env
+
+# Claves de unseal, root token y tokens generados
+secrets/*
+!secrets/.gitkeep
+
+# Snapshots de Raft
+backups/*
+!backups/.gitkeep
+
+# Varios
+*.swp
+.DS_Store

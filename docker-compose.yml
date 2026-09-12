@@ -1,0 +1,108 @@
+# HashiCorp Vault 2.1.0 + Traefik 3.7 (Let's Encrypt DNS-01 con Cloudflare)
+# Un solo nodo con almacenamiento integrado (Raft). Ver README.md.
+name: vault
+
+services:
+  traefik:
+    image: traefik:v3.7.13
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --log.level=${TRAEFIK_LOG_LEVEL:-INFO}
+      - --accesslog=${TRAEFIK_ACCESS_LOG:-false}
+      - --api.dashboard=false
+      - --ping=true
+      - --global.checkNewVersion=false
+      - --global.sendAnonymousUsage=false
+      # Descubrimiento de servicios vía socket Docker (solo contenedores con traefik.enable=true)
+      - --providers.docker=true
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=vault_proxy
+      # Configuración dinámica en fichero (opciones TLS y middlewares)
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      # Entrypoints: 80 redirige a 443, 443 con TLS por defecto
+      - --entryPoints.web.address=:80
+      - --entryPoints.web.http.redirections.entryPoint.to=websecure
+      - --entryPoints.web.http.redirections.entryPoint.scheme=https
+      - --entryPoints.web.http.redirections.entryPoint.permanent=true
+      - --entryPoints.websecure.address=:443
+      - --entryPoints.websecure.http.tls=true
+      - --entryPoints.websecure.http.tls.certResolver=letsencrypt
+      - --entryPoints.websecure.http.middlewares=secure-headers@file
+      # Let's Encrypt con reto DNS-01 (Cloudflare)
+      - --certificatesResolvers.letsencrypt.acme.email=${ACME_EMAIL:?Define ACME_EMAIL en .env}
+      - --certificatesResolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesResolvers.letsencrypt.acme.caServer=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+      - --certificatesResolvers.letsencrypt.acme.dnsChallenge=true
+      - --certificatesResolvers.letsencrypt.acme.dnsChallenge.provider=cloudflare
+      - --certificatesResolvers.letsencrypt.acme.dnsChallenge.resolvers=1.1.1.1:53,8.8.8.8:53
+    environment:
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:?Define CF_DNS_API_TOKEN en .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - traefik_acme:/letsencrypt
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  vault:
+    image: hashicorp/vault:2.1.0
+    container_name: vault
+    restart: unless-stopped
+    command: server
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # Dirección que usa el CLI dentro del contenedor (docker compose exec vault vault ...)
+      VAULT_ADDR: http://127.0.0.1:8200
+      # Dirección pública anunciada a los clientes (Traefik termina TLS)
+      VAULT_API_ADDR: https://${VAULT_DOMAIN:?Define VAULT_DOMAIN en .env}
+      # Dirección de cluster (obligatoria con Raft aunque sea un solo nodo)
+      VAULT_CLUSTER_ADDR: https://vault:8201
+    volumes:
+      - ./vault/config:/vault/config:ro
+      - ./vault/policies:/vault/policies:ro
+      - vault_data:/vault/file
+      - vault_logs:/vault/logs
+    networks:
+      - proxy
+    # Descomenta para acceder por HTTP desde el propio host sin pasar por Traefik:
+    # ports:
+    #   - "127.0.0.1:8200:8200"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.vault.rule: Host(`${VAULT_DOMAIN}`)
+      traefik.http.routers.vault.entrypoints: websecure
+      traefik.http.routers.vault.tls: "true"
+      traefik.http.routers.vault.tls.certresolver: letsencrypt
+      traefik.http.services.vault.loadbalancer.server.port: "8200"
+    healthcheck:
+      # sealedcode/uninitcode=204: el contenedor se considera sano aunque esté sellado o sin
+      # inicializar. Si no, Traefik dejaría de enrutar y no podrías desellarlo desde la UI.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8200/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  proxy:
+    name: vault_proxy
+
+volumes:
+  vault_data:
+  vault_logs:
+  traefik_acme:
