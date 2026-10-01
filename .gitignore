@@ -12,3 +12,11 @@ backups/*
 # Varios
 *.swp
 .DS_Store
+# >>> metodología común
+.env.*
+!.env.example
+data/
+.claude/worktrees/
+.claude/settings.local.json
+CLAUDE.local.md
+# <<< metodología común
