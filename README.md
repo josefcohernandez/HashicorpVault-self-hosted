@@ -1,5 +1,10 @@
 # HashiCorp Vault en Docker
 
+> **Repo archivado.** Vault forma parte ahora de la plataforma del homelab:
+> [myhomelab/vault](https://github.com/josefcohernandez/myhomelab/tree/main/vault) (compose, configuración y
+> snapshots con Backrest). Este repo queda solo como referencia.
+
+
 Despliegue de **HashiCorp Vault 2.1.0** en un solo nodo con almacenamiento integrado
 (Raft), detrás de **Traefik 3.7** que obtiene certificados de Let's Encrypt mediante
 el reto DNS-01 con Cloudflare.
